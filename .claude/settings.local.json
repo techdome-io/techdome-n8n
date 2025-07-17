@@ -12,7 +12,10 @@
       "Bash(./debug-tfvars.sh:*)",
       "Bash(./deploy.sh:*)",
       "Bash(sed:*)",
-      "Bash(./test-update.sh:*)"
+      "Bash(./test-update.sh:*)",
+      "Bash(ls:*)",
+      "Bash(terraform output:*)",
+      "Bash(ssh:*)"
     ],
     "deny": []
   }

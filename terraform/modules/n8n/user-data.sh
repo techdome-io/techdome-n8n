@@ -1,41 +1,68 @@
 #!/bin/bash
 
-set -e
+# Enable logging for debugging
+exec > >(tee /var/log/user-data.log) 2>&1
+set -x
+
+# Don't exit on error - handle errors gracefully
+set +e
+
+echo "Starting n8n deployment script..."
+
+# Get the default user (usually azureuser for Azure VMs)
+DEFAULT_USER="azureuser"
 
 # Update system
-sudo apt-get update -y
-sudo apt-get upgrade -y
+echo "Updating system packages..."
+apt-get update -y
+apt-get upgrade -y
 
 # Install required packages
-sudo apt-get install -y ca-certificates curl gnupg lsb-release
+echo "Installing required packages..."
+apt-get install -y ca-certificates curl gnupg lsb-release
 
 # Remove incompatible Docker packages
+echo "Removing incompatible Docker packages..."
 for pkg in docker.io docker-doc docker-compose docker-compose-v2 podman-docker containerd runc; do 
-    sudo apt-get remove -y $pkg 2>/dev/null || true
+    apt-get remove -y $pkg 2>/dev/null || true
 done
 
 # Install Docker
-sudo install -m 0755 -d /etc/apt/keyrings
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-sudo chmod a+r /etc/apt/keyrings/docker.gpg
+echo "Installing Docker..."
+install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+chmod a+r /etc/apt/keyrings/docker.gpg
 
 echo \
   "deb [arch="$(dpkg --print-architecture)" signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
   "$(. /etc/os-release && echo "$VERSION_CODENAME")" stable" | \
-  sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+  tee /etc/apt/sources.list.d/docker.list > /dev/null
 
-sudo apt-get update -y
-sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+apt-get update -y
+apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+# Start Docker service
+echo "Starting Docker service..."
+systemctl start docker
+systemctl enable docker
 
 # Add user to docker group
-sudo usermod -aG docker $USER
+echo "Adding user to docker group..."
+usermod -aG docker $DEFAULT_USER
+
+# Verify Docker installation
+echo "Verifying Docker installation..."
+docker --version
+docker compose version
 
 # Create project directory
-sudo mkdir -p /opt/n8n
+echo "Creating project directory..."
+mkdir -p /opt/n8n
 cd /opt/n8n
 
 # Create .env file
-sudo tee .env << EOF
+echo "Creating .env file..."
+tee .env << EOF
 # DOMAIN_NAME and SUBDOMAIN together determine where n8n will be reachable from
 DOMAIN_NAME=${domain_name}
 SUBDOMAIN=${subdomain}
@@ -47,7 +74,8 @@ POSTGRES_PASSWORD=${db_password}
 EOF
 
 # Create docker-compose.yml
-sudo tee docker-compose.yml << 'EOF'
+echo "Creating docker-compose.yml..."
+tee docker-compose.yml << 'EOF'
 version: '3.8'
 
 services:
@@ -141,23 +169,53 @@ networks:
 EOF
 
 # Create local-files directory
-sudo mkdir -p local-files
+echo "Creating local-files directory..."
+mkdir -p local-files
 
 # Set proper permissions
-sudo chown -R $USER:$USER /opt/n8n
-sudo chmod +x /opt/n8n
+echo "Setting proper permissions..."
+chown -R $DEFAULT_USER:$DEFAULT_USER /opt/n8n
+chmod +x /opt/n8n
 
 # Start services
+echo "Starting n8n services..."
 cd /opt/n8n
-sudo docker compose up -d
+
+# Use full path to docker compose and run as root initially
+/usr/bin/docker compose up -d
 
 # Wait for services to be ready
+echo "Waiting for services to start..."
 sleep 30
 
 # Check if services are running
-if sudo docker compose ps | grep -q "Up"; then
-    echo "n8n deployment completed successfully!"
-    echo "n8n will be available at: https://${subdomain}.${domain_name}"
+echo "Checking service status..."
+if /usr/bin/docker compose ps | grep -q "Up"; then
+    echo "✅ n8n deployment completed successfully!"
+    echo "🌐 n8n will be available at: https://${subdomain}.${domain_name}"
+    echo "📝 To check logs: docker compose logs -f"
+    echo "🔍 To check status: docker compose ps"
 else
-    echo "Some services failed to start. Check logs with: sudo docker compose logs"
+    echo "❌ Some services failed to start."
+    echo "🔍 Check logs with: docker compose logs"
+    echo "📊 Service status:"
+    /usr/bin/docker compose ps
 fi
+
+# Create a simple status check script
+echo "Creating status check script..."
+tee /opt/n8n/check-status.sh << 'EOF'
+#!/bin/bash
+echo "=== n8n Service Status ==="
+docker compose ps
+echo ""
+echo "=== Service Logs (last 20 lines) ==="
+docker compose logs --tail=20
+EOF
+
+chmod +x /opt/n8n/check-status.sh
+chown $DEFAULT_USER:$DEFAULT_USER /opt/n8n/check-status.sh
+
+echo "🎉 n8n deployment script completed!"
+echo "📍 Project directory: /opt/n8n"
+echo "🔧 Status check script: /opt/n8n/check-status.sh"

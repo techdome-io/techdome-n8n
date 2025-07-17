@@ -15,7 +15,8 @@
       "Bash(./test-update.sh:*)",
       "Bash(ls:*)",
       "Bash(terraform output:*)",
-      "Bash(ssh:*)"
+      "Bash(ssh:*)",
+      "Bash(scp:*)"
     ],
     "deny": []
   }

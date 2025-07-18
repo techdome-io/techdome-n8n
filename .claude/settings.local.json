@@ -1,26 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(find:*)",
-      "Bash(curl:*)",
-      "Bash(chmod:*)",
-      "Bash(python3:*)",
-      "Bash(sudo docker ps:*)",
-      "Bash(grep:*)",
-      "mcp__context7__resolve-library-id",
-      "mcp__context7__get-library-docs",
-      "Bash(./debug-tfvars.sh:*)",
-      "Bash(./deploy.sh:*)",
-      "Bash(sed:*)",
-      "Bash(./test-update.sh:*)",
-      "Bash(ls:*)",
-      "Bash(terraform output:*)",
-      "Bash(ssh:*)",
-      "Bash(scp:*)",
-      "Bash(cp:*)",
-      "Bash(mkdir:*)",
-      "Bash(true)",
-      "Bash(terraform destroy:*)"
+      "Bash(mv:*)",
+      "Bash(rm:*)"
     ],
     "deny": []
   }

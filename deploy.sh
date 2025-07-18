@@ -277,7 +277,8 @@ setup_workflows() {
     echo ""
     
     # Check if workflows directory exists
-    local workflows_dir="$(dirname "${BASH_SOURCE[0]}")/workflows"
+    local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local workflows_dir="$script_dir/workflows"
     if [[ ! -d "$workflows_dir" ]]; then
         print_warning "No workflows directory found at: $workflows_dir"
         print_info "Skipping workflow import. To add workflows:"
@@ -362,7 +363,7 @@ setup_workflows() {
     print_info "✅ Workflows copied to VM"
     
     # Copy import script to VM
-    local import_script="$(dirname "${BASH_SOURCE[0]}")/import_workflows.py"
+    local import_script="$script_dir/import_workflows.py"
     if [[ ! -f "$import_script" ]]; then
         print_error "❌ Import script not found: $import_script"
         print_info "Please ensure import_workflows.py is in the terraform directory"

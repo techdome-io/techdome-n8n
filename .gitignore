@@ -9,6 +9,7 @@
 terraform.tfplan
 terraform.tfplan.*
 *.tfplan
+.claude/
 
 # Crash log files
 crash.log

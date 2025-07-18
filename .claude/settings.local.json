@@ -16,7 +16,11 @@
       "Bash(ls:*)",
       "Bash(terraform output:*)",
       "Bash(ssh:*)",
-      "Bash(scp:*)"
+      "Bash(scp:*)",
+      "Bash(cp:*)",
+      "Bash(mkdir:*)",
+      "Bash(true)",
+      "Bash(terraform destroy:*)"
     ],
     "deny": []
   }

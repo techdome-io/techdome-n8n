@@ -243,6 +243,170 @@ create_new_key_pair() {
     print_info "Key pair name: $KEY_NAME"
 }
 
+# Function to wait for n8n to be ready
+wait_for_n8n_ready() {
+    local vm_ip="$1"
+    local ssh_key="$2"
+    local max_attempts=30
+    local attempt=1
+    
+    print_info "Waiting for n8n to be ready..."
+    
+    while [[ $attempt -le $max_attempts ]]; do
+        print_info "Attempt $attempt/$max_attempts: Checking n8n status..."
+        
+        if ssh -i "$ssh_key" -o ConnectTimeout=10 -o StrictHostKeyChecking=no "$vm_ip" 'sudo docker exec n8n-n8n-1 n8n --version' >/dev/null 2>&1; then
+            print_info "✅ n8n is ready!"
+            return 0
+        else
+            print_info "⏳ n8n not ready yet, waiting 30 seconds..."
+            sleep 30
+            ((attempt++))
+        fi
+    done
+    
+    print_error "❌ n8n failed to become ready after $max_attempts attempts"
+    return 1
+}
+
+# Function to setup and import workflows
+setup_workflows() {
+    print_header "==============================================="
+    print_header "          Automated Workflow Import"
+    print_header "==============================================="
+    echo ""
+    
+    # Check if workflows directory exists
+    local workflows_dir="$(dirname "${BASH_SOURCE[0]}")/workflows"
+    if [[ ! -d "$workflows_dir" ]]; then
+        print_warning "No workflows directory found at: $workflows_dir"
+        print_info "Skipping workflow import. To add workflows:"
+        print_info "1. Create a 'workflows' directory in the terraform folder"
+        print_info "2. Add your .json workflow files to the directory"
+        print_info "3. Re-run the deployment"
+        return 0
+    fi
+    
+    # Check if there are workflow files
+    local workflow_files=$(find "$workflows_dir" -name "*.json" -not -name "*.backup" | wc -l)
+    if [[ $workflow_files -eq 0 ]]; then
+        print_warning "No workflow files found in: $workflows_dir"
+        print_info "Skipping workflow import. Add .json workflow files to the workflows directory."
+        return 0
+    fi
+    
+    print_info "Found $workflow_files workflow files in: $workflows_dir"
+    
+    # Get VM connection details
+    local vm_ip=$(terraform output -raw vm_public_ip 2>/dev/null || terraform output -raw public_ip 2>/dev/null)
+    if [[ -z "$vm_ip" ]]; then
+        print_error "Could not get VM public IP from terraform output"
+        return 1
+    fi
+    
+    local ssh_connection
+    local ssh_key
+    
+    if [[ "$CLOUD" == "azure" ]]; then
+        ssh_connection="azureuser@$vm_ip"
+        ssh_key="$HOME/.ssh/azure_n8n_key"
+        if [[ ! -f "$ssh_key" ]]; then
+            # Try to find SSH key from terraform output or common locations
+            ssh_key=$(find "$HOME/.ssh" -name "*azure*" -name "*.pem" -o -name "*azure*" -name "id_rsa" 2>/dev/null | head -1)
+            if [[ -z "$ssh_key" ]]; then
+                print_error "Could not find SSH key for Azure VM"
+                return 1
+            fi
+        fi
+    elif [[ "$CLOUD" == "aws" ]]; then
+        ssh_connection="ubuntu@$vm_ip"
+        ssh_key="$HOME/.ssh/$KEY_NAME.pem"
+        if [[ ! -f "$ssh_key" ]]; then
+            # Try to find SSH key
+            ssh_key=$(find "$HOME/.ssh" -name "*$KEY_NAME*" -name "*.pem" 2>/dev/null | head -1)
+            if [[ -z "$ssh_key" ]]; then
+                print_error "Could not find SSH key: $KEY_NAME.pem"
+                return 1
+            fi
+        fi
+    fi
+    
+    print_info "Connecting to: $ssh_connection"
+    print_info "Using SSH key: $ssh_key"
+    
+    # Test SSH connection
+    if ! ssh -i "$ssh_key" -o ConnectTimeout=10 -o StrictHostKeyChecking=no "$ssh_connection" 'echo "SSH connection successful"' >/dev/null 2>&1; then
+        print_error "❌ Failed to connect to VM via SSH"
+        print_info "Please check:"
+        print_info "1. VM is running and accessible"
+        print_info "2. SSH key is correct: $ssh_key"
+        print_info "3. Security group/NSG allows SSH access"
+        return 1
+    fi
+    
+    print_info "✅ SSH connection successful"
+    
+    # Wait for n8n to be ready
+    if ! wait_for_n8n_ready "$ssh_connection" "$ssh_key"; then
+        print_error "n8n is not ready. Cannot import workflows."
+        return 1
+    fi
+    
+    # Copy workflows directory to VM
+    print_info "Copying workflows to VM..."
+    if ! scp -i "$ssh_key" -o StrictHostKeyChecking=no -r "$workflows_dir" "$ssh_connection:~/" >/dev/null 2>&1; then
+        print_error "❌ Failed to copy workflows directory to VM"
+        return 1
+    fi
+    
+    print_info "✅ Workflows copied to VM"
+    
+    # Copy import script to VM
+    local import_script="$(dirname "${BASH_SOURCE[0]}")/import_workflows.py"
+    if [[ ! -f "$import_script" ]]; then
+        print_error "❌ Import script not found: $import_script"
+        print_info "Please ensure import_workflows.py is in the terraform directory"
+        return 1
+    fi
+    
+    print_info "Copying import script to VM..."
+    if ! scp -i "$ssh_key" -o StrictHostKeyChecking=no "$import_script" "$ssh_connection:~/" >/dev/null 2>&1; then
+        print_error "❌ Failed to copy import script to VM"
+        return 1
+    fi
+    
+    print_info "✅ Import script copied to VM"
+    
+    # Run workflow import
+    print_info "Starting workflow import..."
+    if ssh -i "$ssh_key" -o StrictHostKeyChecking=no "$ssh_connection" 'python3 ~/import_workflows.py' 2>&1 | while IFS= read -r line; do
+        if [[ "$line" =~ ^🔧 ]] || [[ "$line" =~ ^===== ]] || [[ "$line" =~ ^🚀 ]] || [[ "$line" =~ ^----- ]]; then
+            print_info "$line"
+        elif [[ "$line" =~ ^✅ ]]; then
+            print_info "$line"
+        elif [[ "$line" =~ ^❌ ]]; then
+            print_error "$line"
+        elif [[ "$line" =~ ^⚠️ ]]; then
+            print_warning "$line"
+        elif [[ "$line" =~ ^📊 ]]; then
+            print_info "$line"
+        elif [[ "$line" =~ ^🎉 ]]; then
+            print_info "$line"
+        else
+            echo "$line"
+        fi
+    done; then
+        print_info "✅ Workflow import completed successfully!"
+    else
+        print_error "❌ Workflow import failed or completed with errors"
+        print_info "You can manually import workflows later by:"
+        print_info "1. SSH to the VM: ssh -i $ssh_key $ssh_connection"
+        print_info "2. Run: python3 ~/import_workflows.py"
+    fi
+    
+    echo ""
+}
+
 # Function to get cloud provider choice
 get_cloud_provider() {
     print_header "==============================================="
@@ -687,6 +851,10 @@ case $ACTION in
             print_info "Outputs:"
             terraform output
             echo ""
+            
+            # Automated workflow import
+            setup_workflows
+            
             print_info "Next steps:"
             print_info "1. Point your domain DNS to the public IP address shown above"
             print_info "2. Wait for SSL certificate generation (may take a few minutes)"

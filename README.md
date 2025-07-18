@@ -1,4 +1,4 @@
-# n8n Terraform Deployment
+# n8n Deployment
 
 This repository contains Terraform modules for deploying n8n on both Azure Virtual Machines and AWS EC2 instances using a modular approach.
 

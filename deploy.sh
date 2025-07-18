@@ -276,13 +276,20 @@ setup_workflows() {
     print_header "==============================================="
     echo ""
     
-    # Check if workflows directory exists
+    # Check if workflows directory exists - always look in project root
     local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    local workflows_dir="$script_dir/workflows"
+    local project_root="$script_dir"
+    
+    # If we're in an environment subdirectory, go up to find project root
+    if [[ "$script_dir" == */environments/* ]]; then
+        project_root="$(cd "$script_dir" && cd ../../.. && pwd)"
+    fi
+    
+    local workflows_dir="$project_root/workflows"
     if [[ ! -d "$workflows_dir" ]]; then
         print_warning "No workflows directory found at: $workflows_dir"
         print_info "Skipping workflow import. To add workflows:"
-        print_info "1. Create a 'workflows' directory in the terraform folder"
+        print_info "1. Create a 'workflows' directory in the project root folder"
         print_info "2. Add your .json workflow files to the directory"
         print_info "3. Re-run the deployment"
         return 0
@@ -363,10 +370,10 @@ setup_workflows() {
     print_info "✅ Workflows copied to VM"
     
     # Copy import script to VM
-    local import_script="$script_dir/import_workflows.py"
+    local import_script="$project_root/import_workflows.py"
     if [[ ! -f "$import_script" ]]; then
         print_error "❌ Import script not found: $import_script"
-        print_info "Please ensure import_workflows.py is in the terraform directory"
+        print_info "Please ensure import_workflows.py is in the project root directory"
         return 1
     fi
     
